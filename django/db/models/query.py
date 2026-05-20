@@ -37,7 +37,7 @@ from django.db.models.utils import (
     resolve_callables,
 )
 from django.utils import timezone
-from django.utils.deprecation import RemovedInDjango70Warning
+from django.utils.deprecation import RemovedInDjango70Warning, django_file_prefixes
 from django.utils.functional import cached_property
 
 # The maximum number of results to fetch in a get() query.
@@ -1703,8 +1703,8 @@ class QuerySet(AltersData):
         # Clear limits and ordering so they can be reapplied
         clone.query.clear_ordering(force=True)
         clone.query.default_ordering = True
+        self._clear_ordering_in_combined_queries(clone.query, other_qs)
         clone.query.clear_limits()
-        clone.query.combined_queries = (self.query, *(qs.query for qs in other_qs))
         clone.query.combinator = combinator
         clone.query.combinator_all = all
         return clone
@@ -1774,6 +1774,14 @@ class QuerySet(AltersData):
         elif fields:
             obj.query.add_select_related(fields)
         else:
+            # RemovedInDjango70Warning: when the deprecation ends, raise a
+            # TypeError instead.
+            warnings.warn(
+                "Calling select_related() with no arguments is deprecated. "
+                "Specify the fields to fetch instead.",
+                category=RemovedInDjango70Warning,
+                skip_file_prefixes=django_file_prefixes(),
+            )
             obj.query.select_related = True
         return obj
 
@@ -2326,6 +2334,14 @@ class QuerySet(AltersData):
                 f"Cannot use QuerySet.{method}() on an unordered queryset performing "
                 f"aggregation. Add an ordering with order_by()."
             )
+
+    def _clear_ordering_in_combined_queries(self, cloned_query, other_qs):
+        combined_queries = [self.query]
+        for qs in other_qs:
+            query = qs.query.clone()
+            query.clear_ordering(force=False, clear_default=False)
+            combined_queries.append(query)
+        cloned_query.combined_queries = tuple(combined_queries)
 
 
 class InstanceCheckMeta(type):
